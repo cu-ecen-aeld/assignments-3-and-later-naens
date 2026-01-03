@@ -5,9 +5,6 @@
 set -e
 set -u
 
-make clean
-# make
-
 NUMFILES=10
 WRITESTR=AELD_IS_FUN
 WRITEDIR=/tmp/aeld-data
@@ -57,7 +54,11 @@ fi
 
 for i in $( seq 1 $NUMFILES)
 do
+<<<<<<< HEAD
 	./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
+=======
+	./writer.sh "$WRITEDIR/${username}$i.txt" "$WRITESTR"
+>>>>>>> assignments-base/assignment3-part-2
 done
 
 OUTPUTSTRING=$(./finder.sh "$WRITEDIR" "$WRITESTR")

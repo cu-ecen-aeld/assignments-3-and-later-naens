@@ -18,4 +18,3 @@ void test_validate_my_username()
     char *value = malloc_username_from_conf_file();
     TEST_ASSERT_EQUAL_STRING_MESSAGE(hardcoded_username, value, "The two strings are not equal.");
 }
-
