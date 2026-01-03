@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 if [ $# -ne 2 ]
 then
@@ -19,12 +19,7 @@ echo filesdir="\"$filesdir\"" searchstr="\"$searchstr\""
 
 X=$(find "$filesdir" -type f | wc -l)
 
-Y=0
-while IFS= read -r -d $'\0' filename;
-do
-    nlines=$(grep "$searchstr" "$filename" | wc -l)
-    Y=$((Y+nlines))
-done < <(find "$filesdir" -type f -print0)
+Y=$(find "$filesdir" -type f -exec grep "$searchstr" {} + | wc -l)
 
 message="The number of files are $X and the number of matching lines are $Y"
 
