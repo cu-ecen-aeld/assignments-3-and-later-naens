@@ -5,10 +5,62 @@
 set -e
 set -u
 
+
+# get FINDER
+if command -v finder.sh
+then
+    FINDER=finder.sh
+elif [ -e finder.sh ]
+then
+    FINDER="./finder.sh"
+else
+    echo "no finder"
+    exit
+fi
+
+# get WRITER
+if command -v writer
+then
+    WRITER=writer
+else
+    if [ -e writer.sh ]
+    then
+        WRITER="./writer.sh"
+    else
+        unset WRITER
+    fi
+    if [ -e writer ]
+    then
+        sys_arch=$(uname -m | sed s/_/-/)
+        file_arch=$(file -b writer | cut -d',' -f2 | awk 'NF>0{print $NF}')
+        if [ "$sys_arch" = "$file_arch" ]
+        then
+            WRITER="./writer"
+        fi
+    fi
+fi
+if test -z "$WRITER"
+then
+    echo "no writer"
+    exit
+fi
+
+# get CONF
+if [ -d /etc/finder-app/conf ]
+then
+    CONF=/etc/finder-app/conf
+elif [ -d conf ]
+then
+    CONF=conf
+elif [ -d ../conf
+then
+    CONF=../conf
+fi
+
 NUMFILES=10
 WRITESTR=AELD_IS_FUN
 WRITEDIR=/tmp/aeld-data
-username=$(cat conf/username.txt)
+username=$(cat "$CONF/username.txt")
 
 if [ $# -lt 3 ]
 then
@@ -32,7 +84,7 @@ echo "Writing ${NUMFILES} files containing string ${WRITESTR} to ${WRITEDIR}"
 rm -rf "${WRITEDIR}"
 
 # create $WRITEDIR if not assignment1
-assignment=`cat ../conf/assignment.txt`
+assignment=`cat "$CONF/assignment.txt"`
 
 if [ $assignment != 'assignment1' ]
 then
@@ -48,16 +100,14 @@ then
 		exit 1
 	fi
 fi
-#echo "Removing the old writer utility and compiling as a native application"
-#make clean
-#make
 
 for i in $( seq 1 $NUMFILES)
 do
-	./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
+    $WRITER "$WRITEDIR/${username}$i.txt" "$WRITESTR"
 done
 
-OUTPUTSTRING=$(./finder.sh "$WRITEDIR" "$WRITESTR")
+OUTPUTSTRING=$("$FINDER" "$WRITEDIR" "$WRITESTR")
+echo $OUTPUTSTRING > /tmp/assignment4-result.txt
 
 # remove temporary directories
 rm -rf /tmp/aeld-data
