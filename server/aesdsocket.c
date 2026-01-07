@@ -18,6 +18,7 @@ int sockfd;
 
 bool want_to_exit;
 bool can_exit;
+struct addrinfo *res;
 
 void
 terminate() {
@@ -36,6 +37,7 @@ terminate() {
 
     /* close log and exit */
     syslog(LOG_DEBUG, "Close log and exit\n");
+    freeaddrinfo(res);
     closelog();
     exit(0);
 
@@ -59,7 +61,7 @@ main(argc, argv)
     int argc;
     char **argv;
 {
-    struct addrinfo hints, *res;
+    struct addrinfo hints;
 
     want_to_exit = false;
     can_exit = true;
@@ -108,7 +110,6 @@ main(argc, argv)
         perror("[3]");
         return 3;
     }
-    freeaddrinfo(res);
 
     /* check if running in daemon mode */
     if (argc == 2 && strcmp(argv[1], "-d") == 0) {
@@ -140,7 +141,7 @@ main(argc, argv)
         /* Accept a connection */
         syslog(LOG_DEBUG, "running accept...");
         struct sockaddr addr;
-        int addrlen = sizeof addr;
+        socklen_t addrlen = sizeof addr;
         int accfd;
         if ((accfd = accept(sockfd, &addr, &addrlen)) == -1) {
             perror("[5]");
