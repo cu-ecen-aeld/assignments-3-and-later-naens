@@ -11,10 +11,14 @@
 #include <stdbool.h>
 #include <string.h>
 #include <arpa/inet.h>
-
-int sockfd;
+#include <sys/file.h>
 
 #define THE_FILE "/var/tmp/aesdsocketdata"
+#define SYS_LOCK_FILE "/var/run/aesdsocket-app.lock"
+#define USR_LOCK_FILE "/tmp/aesdsocket-app.lock"
+
+int sockfd;
+int lockfd;
 
 bool want_to_exit;
 bool can_exit;
@@ -28,9 +32,10 @@ terminate() {
      * and deleting the file /var/tmp/aesdsocketdata.
     */
     close(sockfd);
+    close(lockfd);
 
     syslog(LOG_DEBUG, "removing the file %s\n", THE_FILE);
-    if (remove(THE_FILE) == -1) {
+    if (unlink(THE_FILE) == -1 && errno != ENOENT) {
         perror("[-]");
         exit(33);
     }
@@ -57,6 +62,57 @@ static void handler(int sig) {
 }
 
 int
+get_lock(lock_file_path)
+    char *lock_file_path;
+{
+    pid_t pid = getpid();
+    int fd = open(lock_file_path, O_RDWR | O_CREAT, 0644);
+    if (fd == -1) {
+        syslog(LOG_ERR, "could not open lock file %s\n", lock_file_path);
+        exit(1);
+    }
+    if (flock(fd, LOCK_EX | LOCK_NB) == -1) {
+        return -1;
+    }
+    char pidstr[8];
+    sprintf(pidstr, "%d\n", pid);
+    if (write(fd, pidstr, strlen(pidstr)) == -1) {
+        syslog(LOG_ERR, "could not write into lock file %s\n", lock_file_path);
+        exit(1);
+    }
+    return fd;
+}
+
+void
+stop(lock_file_path)
+    char *lock_file_path;
+{
+    int fd = open(lock_file_path, O_RDONLY, 0);
+    if (fd == -1) {
+        if (errno == ENOENT) {
+            return;
+        }
+        syslog(LOG_ERR, "error while opening lock file %s\n", lock_file_path);
+        exit(1);
+    }
+    char pidstr[8];
+    if (read(fd, pidstr, sizeof pidstr) == -1) {
+        syslog(LOG_ERR, "error reading lock file %s\n", lock_file_path);
+        exit(1);
+    }
+    pid_t pid = atoi(pidstr);
+    if (kill(pid, SIGTERM) == -1) {
+        if (errno == EINVAL || errno == ESRCH) {
+            return;
+        }
+        syslog(LOG_ERR, "kill error\n");
+        exit(1);
+    }
+    close(fd);
+    unlink(lock_file_path);
+}
+
+int
 main(argc, argv)
     int argc;
     char **argv;
@@ -68,6 +124,18 @@ main(argc, argv)
 
     openlog(NULL, LOG_PERROR, LOG_USER);
     syslog(LOG_DEBUG, "the file is %s\n", THE_FILE);
+
+    char *lock_file_path;
+    if (geteuid() == 0) {
+        lock_file_path = SYS_LOCK_FILE;
+    } else {
+        lock_file_path = USR_LOCK_FILE;
+    }
+
+    if (argc == 2 && strcmp(argv[1], "-q") == 0) {
+        stop(lock_file_path);
+        exit(0);
+    }
 
     /*
      * Open a stream socket bound to port 9000,
@@ -117,6 +185,11 @@ main(argc, argv)
             exit(0);
         }
         syslog(LOG_DEBUG, "running in daemon mode\n");
+        lockfd = get_lock(lock_file_path);
+        if (lockfd == -1) {
+            syslog(LOG_ERR, "could not obtain lock\n");
+            exit(1);
+        }
     } else {
         syslog(LOG_DEBUG, "running in non daemon mode\n");
     }
