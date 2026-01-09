@@ -1,6 +1,7 @@
 #!/bin/sh
 
 echo aesdsocket-start-stop
+
 if [ $# = 1 ]
 then
     dir=$(dirname $(realpath $0))
@@ -10,20 +11,21 @@ then
         server="aesdsocket"
     else
         server="$dir/aesdsocket"
+        if [ -f "$server" ]
+        then
+            exit 1
+        fi
     fi
     echo server=$server
-    if [ -f "$server" ]
+    if [ "$cmd" = "start" ]
     then
-        if [ "$cmd" = "start" ]
-        then
-            echo "Starting aesdsocket"
-            $server -d
-#            start-stop-daemon -S -n $server -d
-        elif [ "$cmd" = "stop" ]
-        then
-            echo "Stopping aesdsocket"
-            $server -q
-#            start-stop-daemon -K -n $server
-        fi
+        echo "Starting aesdsocket"
+        $server -d
+        #start-stop-daemon -S -n $server -d
+    elif [ "$cmd" = "stop" ]
+    then
+        echo "Stopping aesdsocket"
+        $server -q
+        #start-stop-daemon -K -n $server
     fi
 fi
