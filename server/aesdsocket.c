@@ -67,6 +67,9 @@ terminate()
     struct thread_info *t = threads;
     struct thread_info *p = t;
     while (t != NULL) {
+        if (!t -> deleted) {
+            pthread_join(t->id, NULL);
+        }
         t = t->next;
         free(p);
         p = t;
@@ -335,6 +338,7 @@ main(argc, argv)
     openlog(NULL, LOG_PERROR, LOG_USER);
     syslog(LOG_DEBUG, "the file is %s\n", THE_FILE);
 
+
     char *lock_file_path;
     if (geteuid() == 0) {
         lock_file_path = SYS_LOCK_FILE;
@@ -364,6 +368,19 @@ main(argc, argv)
     } else {
         syslog(LOG_DEBUG, "running in non daemon mode\n");
     }
+
+    /* truncate the file */
+    int the_file_fd = open(THE_FILE, O_WRONLY|O_CREAT|O_APPEND,
+        S_IRUSR|S_IRGRP|S_IROTH|S_IWUSR|S_IWGRP|S_IWOTH);
+    if (the_file_fd == -1) {
+        syslog(LOG_ERR, "could not open the file");
+        exit(-1);
+    }
+    if (ftruncate(the_file_fd, 0) == -1) {
+        syslog(LOG_ERR, "could not truncate the file");
+        exit(-1);
+    }
+    close(the_file_fd);
 
     /* start the timer */
     if (pthread_create(&time_thread, NULL, time_routine, NULL) != 0) {
@@ -412,19 +429,16 @@ main(argc, argv)
             }
 
             /* Start a new thread */
-            pthread_t thread;
             struct thread_info *new_thread = malloc(sizeof (struct thread_info));
-            memset(new_thread, 0, sizeof (struct thread_info));
-            if (pthread_create(&thread, NULL, thread_routine, new_thread) != 0) {
-                syslog(LOG_ERR, "thread creation error");
-                return -1;
-            }
-            new_thread->id = thread;
             new_thread->fd = accfd;
             new_thread->sin = sin;
             new_thread->has_finished = false;
             new_thread->deleted = false;
             new_thread->next = threads;
+            if (pthread_create(&new_thread->id, NULL, thread_routine, new_thread) != 0) {
+                syslog(LOG_ERR, "thread creation error");
+                return -1;
+            }
             threads = new_thread;
             syslog(LOG_DEBUG, "creating new thread id=%ld", new_thread->id);
             connections += 1;
