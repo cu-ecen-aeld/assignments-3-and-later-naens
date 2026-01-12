@@ -182,16 +182,22 @@ thread_routine(info)
     ssize_t recsz;
     ssize_t rec_tot = 0;
     while ((recsz = recv(info->fd, buf, sizeof buf, recv_flags)) == sizeof buf) {
-        write(outfd, buf, sizeof buf);
+        if (write(outfd, buf, sizeof buf) == -1) {
+            perror("[w] error");
+            exit(-1);
+        }
         rec_tot += sizeof buf;
     }
     if (recsz == -1 && errno != EAGAIN) {
         syslog(LOG_ERR, "thread_routine[%ld]: error fd=%d", info->id, info->fd);
-        perror("[6] error");
+        perror("[recv] error");
         exit(6);
     }
     if (recsz > 0) {
-        write(outfd, buf, recsz);
+        if (write(outfd, buf, recsz) == -1) {
+            perror("[w] error");
+            exit(-1);
+        }
         rec_tot += recsz;
     }
     close(outfd);
@@ -206,15 +212,21 @@ thread_routine(info)
     ssize_t count;
     ssize_t count_tot = 0;
     while ((count = read(infd, buf, sizeof buf)) == sizeof buf) {
-        send(info->fd, buf, sizeof buf, send_flags);
+        if(send(info->fd, buf, sizeof buf, send_flags) == -1) {
+            perror("[s] error");
+            exit(-1);
+        }
         count_tot += sizeof buf;
     }
     if (count > 0) {
-        send(info->fd, buf, count, send_flags);
+        if (send(info->fd, buf, count, send_flags) == -1) {
+            perror("[s] error");
+            exit(-1);
+        }
         count_tot += count;
     }
     if (count == -1) {
-        perror("[7]");
+        perror("[read]");
         exit(7);
     }
     syslog(LOG_DEBUG, "thread_routine[%ld]: sent: %ld bytes", info->id, count_tot);
