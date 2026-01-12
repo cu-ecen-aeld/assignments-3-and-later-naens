@@ -324,7 +324,10 @@ time_routine()
         char out_buf[0x80];
         sprintf(out_buf, "timestamp:%s\n", timestr);
         pthread_mutex_lock(&mutex);
-        write(fd, out_buf, strlen(out_buf));
+        if (write(fd, out_buf, strlen(out_buf)) == -1) {
+            syslog(LOG_ERR, "write error\n");
+            exit(-1);
+        }
         pthread_mutex_unlock(&mutex);
 
         /* sleeping */
