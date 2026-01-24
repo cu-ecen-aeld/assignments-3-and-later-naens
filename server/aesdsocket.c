@@ -16,14 +16,27 @@
 #include <time.h>
 #include <sys/time.h>
 
+#define USE_AESD_CHAR_DEVICE 1
+
+#ifdef USE_AESD_CHAR_DEVICE
+
+#define THE_FILE "/dev/aesdchar"
+#undef SYS_LOCK_FILE
+#undef USR_LOCK_FILE
+#undef TIME_DELAY
+
+#else
+
 #define THE_FILE "/var/tmp/aesdsocketdata"
 #define SYS_LOCK_FILE "/var/run/aesdsocket-app.lock"
 #define USR_LOCK_FILE "/tmp/aesdsocket-app.lock"
-
 #define TIME_DELAY 10
 
-int sockfd;
 int lockfd;
+#endif
+
+
+int sockfd;
 
 bool want_to_exit;
 bool can_exit;
@@ -32,9 +45,11 @@ bool exiting;
 struct thread_info *threads;
 pthread_t time_thread;
 
+#ifdef USE_AESD_CHAR_DEVICE
 pthread_cond_t timer_cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t timer_mutex = PTHREAD_MUTEX_INITIALIZER;
 struct timespec timer_abstime;
+#endif
 
 
 struct addrinfo *res;
@@ -55,7 +70,10 @@ terminate()
     }
     exiting = true;
     close(sockfd);
+
+    #ifndef USE_AESD_CHAR_DEVICE
     close(lockfd);
+    #endif
 
     syslog(LOG_DEBUG, "removing the file %s\n", THE_FILE);
     if (unlink(THE_FILE) == -1 && errno != ENOENT) {
@@ -76,6 +94,7 @@ terminate()
     }
 
     /* wait for timer to end */
+    #ifndef USE_AESD_CHAR_DEVICE
     syslog(LOG_DEBUG, "Waiting for timer to end");
     pthread_mutex_lock(&timer_mutex);
     pthread_cond_signal(&timer_cond);
@@ -86,6 +105,7 @@ terminate()
     }
     syslog(LOG_DEBUG, "timer: joined");
     syslog(LOG_DEBUG, "Timer closed");
+    #endif
 
     /* close log and exit */
     pid_t pid = getpid();
@@ -107,6 +127,7 @@ static void handler(int sig) {
     }
 }
 
+#ifndef USE_AESD_CHAR_DEVICE
 int
 get_lock(lock_file_path)
     char *lock_file_path;
@@ -157,8 +178,12 @@ stop(lock_file_path)
     close(fd);
     unlink(lock_file_path);
 }
+#endif
 
+#ifndef USE_AESD_CHAR_DEVICE
 pthread_mutex_t mutex;
+#endif
+
 void*
 thread_routine(info)
     struct thread_info *info;
@@ -169,8 +194,11 @@ thread_routine(info)
 //    int send_flags = MSG_DONTWAIT;
 
     syslog(LOG_DEBUG, "thread_routine[%ld]: begin fd=%d", info->id, info->fd);
+
+    #ifndef USE_AESD_CHAR_DEVICE
     /* get mutex */
     pthread_mutex_lock(&mutex);
+    #endif
 
     /* Receive data and append to file /var/tmp/aesdsocketdata */
     syslog(LOG_DEBUG, "thread_routine[%ld]: receive...", info->id);
@@ -236,8 +264,11 @@ thread_routine(info)
     info->has_finished = true;
     syslog(LOG_DEBUG, "thread_routine[%ld]: end, has_finished=true, fd=%d", info->id, info->fd);
 
+    #ifndef USE_AESD_CHAR_DEVICE
     /* release mutex */
     pthread_mutex_unlock(&mutex);
+    #endif
+
     return NULL;
 }
 
@@ -298,6 +329,7 @@ socket_init()
     return sockfd;
 }
 
+#ifndef USE_AESD_CHAR_DEVICE
 void*
 time_routine()
 {
@@ -340,6 +372,7 @@ time_routine()
     }
     return NULL;
 }
+#endif
 
 int
 main(argc, argv)
@@ -354,6 +387,7 @@ main(argc, argv)
     syslog(LOG_DEBUG, "the file is %s\n", THE_FILE);
 
 
+    #ifndef USE_AESD_CHAR_DEVICE
     char *lock_file_path;
     if (geteuid() == 0) {
         lock_file_path = SYS_LOCK_FILE;
@@ -365,10 +399,12 @@ main(argc, argv)
         stop(lock_file_path);
         exit(0);
     }
+    #endif
 
     /* initialize the socket */
     sockfd = socket_init();
 
+    #ifndef USE_AESD_CHAR_DEVICE
     /* check if running in daemon mode */
     if (argc == 2 && strcmp(argv[1], "-d") == 0) {
         if (fork() != 0) {
@@ -383,6 +419,7 @@ main(argc, argv)
     } else {
         syslog(LOG_DEBUG, "running in non daemon mode\n");
     }
+    #endif
 
     /* truncate the file */
     int the_file_fd = open(THE_FILE, O_WRONLY|O_CREAT|O_APPEND,
@@ -397,11 +434,13 @@ main(argc, argv)
     }
     close(the_file_fd);
 
+    #ifndef USE_AESD_CHAR_DEVICE
     /* start the timer */
     if (pthread_create(&time_thread, NULL, time_routine, NULL) != 0) {
         syslog(LOG_ERR, "timer thread creation error");
         exit(301);
     }
+    #endif
 
     /* initialize signal handlers */
     if (signal(SIGINT, handler) == SIG_ERR) {
@@ -413,11 +452,13 @@ main(argc, argv)
         return 9;
     }
 
+    #ifndef USE_AESD_CHAR_DEVICE
     /* initialize mutex */
     if (pthread_mutex_init(&mutex, NULL) != 0) {
         perror("[x]");
         return 101;
     }
+    #endif
 
     int connections = 0;
     threads = NULL;
