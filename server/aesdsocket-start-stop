@@ -5,7 +5,7 @@ then
     server="aesdsocket"
     if [ "$1" = "start" ]
     then
-        start-stop-daemon -v -S -x $server
+        start-stop-daemon -v -S -x $server -b
     elif [ "$1" = "stop" ]
     then
         start-stop-daemon -v -K -x $server
