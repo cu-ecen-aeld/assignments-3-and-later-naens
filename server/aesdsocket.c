@@ -20,6 +20,8 @@
 
 #ifdef USE_AESD_CHAR_DEVICE
 
+#include "aesd_ioctl.h"
+
 #define THE_FILE "/dev/aesdchar"
 #undef SYS_LOCK_FILE
 #undef USR_LOCK_FILE
@@ -73,13 +75,13 @@ terminate()
 
     #ifndef USE_AESD_CHAR_DEVICE
     close(lockfd);
-    #endif
 
     syslog(LOG_DEBUG, "removing the file %s\n", THE_FILE);
     if (unlink(THE_FILE) == -1 && errno != ENOENT) {
         perror("[-]");
         exit(33);
     }
+    #endif
 
     /* free thread structures */
     struct thread_info *t = threads;
@@ -180,7 +182,52 @@ stop(lock_file_path)
 }
 #endif
 
-#ifndef USE_AESD_CHAR_DEVICE
+#ifdef USE_AESD_CHAR_DEVICE
+bool read_command(char *command, loff_t *entry_num, loff_t *offset) {
+    const char *prefix = "AESDCHAR_IOCSEEKTO:";
+
+    int i = 0;
+    syslog(LOG_ERR, "read_command: 1 command=\"%s\"", command);
+    while (prefix[i] != '\0' && command[i] != '\0' && prefix[i] == command[i]) {
+        ++i;
+    }
+    syslog(LOG_ERR, "read_command: 1_ i=%d", i);
+    if (prefix[i] != '\0') {
+        return false;
+    }
+    syslog(LOG_ERR, "read_command: 1a");
+    loff_t x = 0;
+    if (command[i] < '0' || command[i] > '9') {
+        return false;
+    }
+    syslog(LOG_ERR, "read_command: 1b");
+    while (command[i] >= '0' && command[i] <= '9') {
+        x = x * 10 + command[i] - '0';
+        ++i;
+    }
+    if (command[i] != ',') {
+        return false;
+    }
+    syslog(LOG_ERR, "read_command: 2");
+    ++i;
+    loff_t y = 0;
+    if (command[i] < '0' || command[i] > '9') {
+        return false;
+    }
+    while (command[i] >= '0' && command[i] <= '9') {
+        y = y * 10 + command[i] - '0';
+        ++i;
+    }
+    if (command[i] != '\n') {
+        return false;
+    }
+    *entry_num = x;
+    *offset = y;
+    syslog(LOG_ERR, "read_command: 3");
+    return true;
+}
+
+#else
 pthread_mutex_t mutex;
 #endif
 
@@ -200,16 +247,36 @@ thread_routine(info)
     pthread_mutex_lock(&mutex);
     #endif
 
-    /* Receive data and append to file /var/tmp/aesdsocketdata */
+    /* Receive data and append to THE_FILE */
     syslog(LOG_DEBUG, "thread_routine[%ld]: receive...", info->id);
     char buf[0x100];
     int outfd;
     outfd = open(THE_FILE,
+    #ifdef USE_AESD_CHAR_DEVICE
+        O_RDWR|O_APPEND,
+    #else
         O_WRONLY|O_CREAT|O_APPEND,
+    #endif
         S_IRUSR|S_IRGRP|S_IROTH|S_IWUSR|S_IWGRP|S_IWOTH);
     ssize_t recsz;
     ssize_t rec_tot = 0;
+//    char *command = NULL;
     while ((recsz = recv(info->fd, buf, sizeof buf, recv_flags)) == sizeof buf) {
+        #ifdef USE_AESD_CHAR_DEVICE
+        loff_t entry_num;
+        loff_t offset;
+        if (read_command(buf, &entry_num, &offset)) {
+            syslog(LOG_DEBUG, "thread_routine: read command %s", buf);
+            struct aesd_seekto seekto;
+            seekto.write_cmd = (uint32_t)entry_num;
+            seekto.write_cmd_offset = (uint32_t)offset;
+            ioctl(outfd, AESDCHAR_IOCSEEKTO, &seekto);
+//            command = strdup(buf);
+            continue; /* do not write the command to device */
+        } else {
+            syslog(LOG_DEBUG, "thread_routine: not command %s", buf);
+        }
+        #endif
         if (write(outfd, buf, sizeof buf) == -1) {
             perror("[w] error");
             exit(-1);
@@ -222,23 +289,57 @@ thread_routine(info)
         exit(6);
     }
     if (recsz > 0) {
-        if (write(outfd, buf, recsz) == -1) {
-            perror("[w] error");
-            exit(-1);
+        #ifdef USE_AESD_CHAR_DEVICE
+        loff_t entry_num;
+        loff_t offset;
+        if (read_command(buf, &entry_num, &offset)) {
+            syslog(LOG_DEBUG, "thread_routine: read command %s", buf);
+            struct aesd_seekto seekto;
+            seekto.write_cmd = (uint32_t)entry_num;
+            seekto.write_cmd_offset = (uint32_t)offset;
+            ioctl(outfd, AESDCHAR_IOCSEEKTO, &seekto);
+//            command = strdup(buf);
+        } else {
+            syslog(LOG_DEBUG, "thread_routine: not command %s", buf);
+        #endif
+            if (write(outfd, buf, recsz) == -1) {
+                perror("[w] error");
+                exit(-1);
+            }
+        #ifdef USE_AESD_CHAR_DEVICE
         }
+        #endif
         rec_tot += recsz;
     }
+    #ifndef USE_AESD_CHAR_DEVICE
     close(outfd);
+    #endif
     syslog(LOG_DEBUG, "thread_routine[%ld]: received: %ld bytes\n", info->id, rec_tot);
 
     /*
-     * Return the full content of /var/tmp/aesdsocketdata to the client
+     * Return the full content of THE_FILE to the client
      * as soon as the received data packet completes.
      */
     syslog(LOG_DEBUG, "thread_routine[%ld]: sending bytes...", info->id);
+    #ifdef USE_AESD_CHAR_DEVICE
+    int infd = outfd;
+    #else
     int infd = open(THE_FILE, O_RDONLY);
-    ssize_t count;
+    #endif
     ssize_t count_tot = 0;
+    /*
+    #ifdef USE_AESD_CHAR_DEVICE
+    if (command != NULL) {
+        if(send(info->fd, command, strlen(command), send_flags) == -1) {
+            perror("[S] error");
+            exit(-1);
+        }
+        count_tot += strlen(command);
+        free(command);
+    }
+    #endif
+    */
+    ssize_t count;
     while ((count = read(infd, buf, sizeof buf)) == sizeof buf) {
         if(send(info->fd, buf, sizeof buf, send_flags) == -1) {
             perror("[s] error");
@@ -419,7 +520,6 @@ main(argc, argv)
     } else {
         syslog(LOG_DEBUG, "running in non daemon mode\n");
     }
-    #endif
 
     /* truncate the file */
     int the_file_fd = open(THE_FILE, O_WRONLY|O_CREAT|O_APPEND,
@@ -434,7 +534,6 @@ main(argc, argv)
     }
     close(the_file_fd);
 
-    #ifndef USE_AESD_CHAR_DEVICE
     /* start the timer */
     if (pthread_create(&time_thread, NULL, time_routine, NULL) != 0) {
         syslog(LOG_ERR, "timer thread creation error");
